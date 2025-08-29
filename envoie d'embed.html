@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>éditeur d'embed SHB</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #2c2f33;
+      color: #fff;
+      margin: 0;
+      padding: 20px;
+    }
+    .container {
+      max-width: 1100px;
+      margin: auto;
+      background: #23272a;
+      padding: 20px;
+      border-radius: 10px;
+    }
+    input, textarea {
+      width: 100%;
+      margin: 5px 0 10px;
+      padding: 8px;
+      border-radius: 5px;
+      border: none;
+    }
+    textarea { resize: vertical; }
+    button {
+      margin: 5px 5px 5px 0;
+      padding: 8px 15px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      background: #5865f2;
+      color: white;
+    }
+    button:hover { background: #4752c4; }
+    .embed {
+      background: #2c2f33;
+      padding: 15px;
+      margin: 15px 0;
+      border-radius: 8px;
+      border-left: 5px solid #5865f2;
+    }
+    .field { margin-bottom: 10px; padding: 10px; background: #2f3136; border-radius: 5px; }
+    .embed-preview {
+      margin-top: 20px;
+      background: #2f3136;
+      padding: 15px;
+      border-radius: 5px;
+      border-left: 5px solid #5865f2;
+    }
+    .embed-field { margin-bottom: 6px; white-space: pre-line; }
+    .embed-field-inline { display: inline-block; width: 48%; vertical-align: top; white-space: pre-line; }
+    h3 { margin-top: 25px; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h2>Générateur d'embed SHB - dev par spatio</h2>
+
+  <label>Webhook URL</label>
+  <input id="webhook">
+
+  <h3>Paramètres du message</h3>
+  <label>Contenu (message brut)</label>
+  <textarea id="content"></textarea>
+
+  <label>Nom du bot (username)</label>
+  <input id="username">
+
+  <label>Avatar du bot (URL)</label>
+  <input id="avatar_url">
+
+  <label><input type="checkbox" id="tts"> Envoyer en TTS</label>
+
+  <h3>Embeds</h3>
+  <div id="embeds"></div>
+  <button onclick="addEmbed()">➕ Ajouter un embed</button>
+
+  <h3>Actions</h3>
+  <button onclick="sendEmbeds()">📤 Envoyer</button>
+  <button onclick="exportEmbeds()">💾 Exporter JSON</button>
+  <input type="file" id="importFile" accept=".json" onchange="importEmbeds(event)">
+
+  <h3>Aperçu</h3>
+  <div id="preview"></div>
+</div>
+
+<script>
+let embedCount = 0;
+
+function addEmbed(data = null) {
+  const id = embedCount++;
+  const div = document.createElement("div");
+  div.className = "embed";
+  div.dataset.id = id;
+  div.innerHTML = `
+    <h3>Embed #${id+1}</h3>
+    <label>Titre</label><input class="title" value="${data?.title || ""}">
+    <label>Description</label><textarea class="description">${data?.description || ""}</textarea>
+    <label>URL</label><input class="url" value="${data?.url || ""}">
+    <label>Couleur (hex)</label><input class="color" value="${data?.color ? "#"+data.color.toString(16).padStart(6,"0") : "#5865f2"}">
+    <label>Timestamp</label><input type="datetime-local" class="timestamp" value="${data?.timestamp ? new Date(data.timestamp).toISOString().slice(0,16) : ""}">
+    
+    <h4>Auteur</h4>
+    <label>Nom</label><input class="author_name" value="${data?.author?.name || ""}">
+    <label>URL</label><input class="author_url" value="${data?.author?.url || ""}">
+    <label>Icon URL</label><input class="author_icon" value="${data?.author?.icon_url || ""}">
+    
+    <h4>Pied de page</h4>
+    <label>Texte</label><input class="footer_text" value="${data?.footer?.text || ""}">
+    <label>Icon URL</label><input class="footer_icon" value="${data?.footer?.icon_url || ""}">
+    
+    <h4>Images</h4>
+    <label>Image URL</label><input class="image" value="${data?.image?.url || ""}">
+    <label>Thumbnail URL</label><input class="thumbnail" value="${data?.thumbnail?.url || ""}">
+    
+    <h4>Fields</h4>
+    <div class="fields"></div>
+    <button onclick="addField(this)">➕ Ajouter un field</button>
+    <br>
+    <button onclick="this.parentNode.remove();updatePreview()">❌ Supprimer cet embed</button>
+  `;
+  document.getElementById("embeds").appendChild(div);
+
+  if (data?.fields) {
+    data.fields.forEach(f => addField(div.querySelector(".fields"), f.name, f.value, f.inline));
+  }
+
+  updatePreview();
+}
+
+function addField(buttonOrDiv, name="", value="", inline=false) {
+  const container = buttonOrDiv.classList?.contains("fields") ? buttonOrDiv : buttonOrDiv.previousElementSibling;
+  const div = document.createElement("div");
+  div.className = "field";
+  div.innerHTML = `
+    <label>Nom</label><input class="fname" value="${name}">
+    <label>Valeur</label><textarea class="fvalue">${value}</textarea>
+    <label><input type="checkbox" class="finline" ${inline?"checked":""}> Inline</label>
+    <button onclick="this.parentNode.remove();updatePreview()">❌ Supprimer</button>
+  `;
+  container.appendChild(div);
+  updatePreview();
+}
+
+function collectEmbeds() {
+  const embeds = [];
+  document.querySelectorAll("#embeds .embed").forEach(embedDiv => {
+    const fields = [];
+    embedDiv.querySelectorAll(".field").forEach(f => {
+      fields.push({
+        name: f.querySelector(".fname").value,
+        value: "```"+f.querySelector(".fvalue").value+"```",
+        inline: f.querySelector(".finline").checked
+      });
+    });
+    const colorHex = embedDiv.querySelector(".color").value.replace("#","");
+    const ts = embedDiv.querySelector(".timestamp").value;
+    embeds.push({
+      title: embedDiv.querySelector(".title").value || undefined,
+      description: embedDiv.querySelector(".description").value || undefined,
+      url: embedDiv.querySelector(".url").value || undefined,
+      color: parseInt(colorHex,16),
+      timestamp: ts ? new Date(ts).toISOString() : undefined,
+      author: {
+        name: embedDiv.querySelector(".author_name").value || undefined,
+        url: embedDiv.querySelector(".author_url").value || undefined,
+        icon_url: embedDiv.querySelector(".author_icon").value || undefined
+      },
+      footer: {
+        text: embedDiv.querySelector(".footer_text").value || undefined,
+        icon_url: embedDiv.querySelector(".footer_icon").value || undefined
+      },
+      image: { url: embedDiv.querySelector(".image").value || undefined },
+      thumbnail: { url: embedDiv.querySelector(".thumbnail").value || undefined },
+      fields
+    });
+  });
+  return embeds;
+}
+
+function buildPayload() {
+  return {
+    content: document.getElementById("content").value || undefined,
+    username: document.getElementById("username").value || undefined,
+    avatar_url: document.getElementById("avatar_url").value || undefined,
+    tts: document.getElementById("tts").checked,
+    embeds: collectEmbeds()
+  };
+}
+
+function updatePreview() {
+  const payload = buildPayload();
+  const container = document.getElementById("preview");
+  container.innerHTML = "";
+
+  if (payload.content) {
+    container.innerHTML += `<p>${payload.content.replace(/\n/g,"<br>")}</p>`;
+  }
+
+  payload.embeds.forEach((e,i) => {
+    let html = `<div class="embed-preview"><h4>Embed #${i+1}${e.title?": "+e.title:""}</h4>`;
+    if (e.description) html += `<p style="white-space:pre-line">${e.description}</p>`;
+    if (e.fields?.length) {
+      e.fields.forEach(f => {
+        const cls = f.inline ? "embed-field-inline" : "embed-field";
+        html += `<div class="${cls}"><b>${f.name}</b><br>${f.value.replace(/\n/g,"<br>")}</div>`;
+      });
+    }
+    if (e.footer?.text) html += `<div style="margin-top:10px;font-size:12px;opacity:.7">${e.footer.text}</div>`;
+    html += `</div>`;
+    container.innerHTML += html;
+  });
+}
+
+function sendEmbeds() {
+  const payload = buildPayload();
+  const webhook = document.getElementById("webhook").value;
+  fetch(webhook, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  }).then(r => {
+    if (r.ok) alert("Message envoyé !");
+    else alert("Erreur lors de l’envoi");
+  });
+}
+
+function exportEmbeds() {
+  const payload = buildPayload();
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "embed_message.json";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function importEmbeds(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const data = JSON.parse(e.target.result);
+      document.getElementById("content").value = data.content || "";
+      document.getElementById("username").value = data.username || "";
+      document.getElementById("avatar_url").value = data.avatar_url || "";
+      document.getElementById("tts").checked = !!data.tts;
+      document.getElementById("embeds").innerHTML = "";
+      (data.embeds || []).forEach(embed => addEmbed(embed));
+      updatePreview();
+    } catch {
+      alert("Fichier JSON invalide !");
+    }
+  };
+  reader.readAsText(file);
+}
+
+document.addEventListener("input", e => {
+  if (e.target.closest(".embed") || ["content","username","avatar_url","tts"].includes(e.target.id)) updatePreview();
+});
+</script>
+</body>
+</html>
